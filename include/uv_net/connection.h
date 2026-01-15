@@ -39,20 +39,6 @@ public:
     virtual void SetOnMessage(CallbackMessage cb) = 0;
     virtual void SetOnClose(CallbackClose cb) = 0;
     virtual bool Start(const std::string& ip, int port) = 0;
-    
-    // 协议解析器设置
-    virtual void SetServerProtocol(std::shared_ptr<ServerProtocol> protocol) = 0;
-    
-    // 缓冲区配置
-    virtual void SetReadBufferSize(size_t size) = 0;
-    virtual void SetMaxSendQueueSize(size_t size) = 0;
-    
-    // 连接池管理
-    virtual void SetMaxConnections(size_t max) = 0;
-    virtual void SetHeartbeatInterval(int64_t interval_ms) = 0;
-    
-    // 连接超时管理
-    virtual void SetConnectionReadTimeout(int64_t timeout_ms) = 0;
 };
 
 } // namespace uv_net

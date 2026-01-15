@@ -9,10 +9,9 @@ libuv_server基于libuv的事件驱动模型构建，主要包含以下核心组
 
 1. **事件循环**：使用libuv的事件循环处理网络I/O、定时器、异步操作等
 2. **连接管理**：封装TCP和UDP连接，提供统一的连接接口
-3. **多线程支持**：TCP服务器支持多线程处理连接请求
-4. **发送缓冲**：TCP连接内置发送队列，支持高频发送操作
-5. **连接ID分配**：为每个TCP/WebSocket连接分配唯一的连接ID，方便日志追踪和调试
-6. **优雅退出**：支持USR1信号触发的优雅退出，确保资源正确释放
+3. **发送缓冲**：TCP连接内置发送队列，支持高频发送操作
+4. **连接ID分配**：为每个TCP/WebSocket连接分配唯一的连接ID，方便日志追踪和调试
+5. **优雅退出**：支持USR1信号触发的优雅退出，确保资源正确释放
 
 ### 架构图
 
@@ -24,12 +23,6 @@ flowchart TD
     B --> E[事件循环]
     E --> F[libuv]
     F --> G[系统调用]
-    
-    subgraph 多线程处理
-    B --> H[线程池]
-    H --> I[多个事件循环]
-    I --> J[连接处理]
-    end
 ```
 
 ## 核心接口
@@ -54,13 +47,28 @@ TCP服务器实现：
 ```cpp
 class TcpServer : public Server {
 public:
-    TcpServer(uv_loop_t* loop);                          // 构造函数
+    TcpServer(uv_loop_t* loop, const ServerConfig& config = ServerConfig());  // 构造函数
     
     void SetOnOpen(CallbackOpen cb);                     // 设置连接打开回调
     void SetOnMessage(CallbackMessage cb);               // 设置消息回调
     void SetOnClose(CallbackClose cb);                   // 设置连接关闭回调
     
-    bool Start(const std::string& ip, int port, int thread_count);  // 启动服务器
+    bool Start(const std::string& ip, int port);  // 启动服务器
+    
+    // 配置管理
+    void SetConfig(const ServerConfig& config);
+    const ServerConfig& GetConfig() const;
+    
+    // 缓冲区配置
+    void SetReadBufferSize(size_t size);
+    void SetMaxSendQueueSize(size_t size);
+    
+    // 连接池管理
+    void SetMaxConnections(size_t max);
+    void SetHeartbeatInterval(int64_t interval_ms);
+    
+    // 连接读超时设置
+    void SetConnectionReadTimeout(int64_t timeout_ms);
 };
 ```
 
@@ -70,13 +78,24 @@ UDP服务器实现：
 ```cpp
 class UdpServer : public Server {
 public:
-    UdpServer();                                         // 构造函数
+    UdpServer(uv_loop_t* loop = uv_default_loop(), const ServerConfig& config = ServerConfig());  // 构造函数
     
     void SetOnOpen(CallbackOpen cb);                     // 设置连接打开回调
     void SetOnMessage(CallbackMessage cb);               // 设置消息回调
     void SetOnClose(CallbackClose cb);                   // 设置连接关闭回调
     
-    bool Start(const std::string& ip, int port, int thread_count);  // 启动服务器
+    bool Start(const std::string& ip, int port);  // 启动服务器
+    
+    // 缓冲区配置
+    void SetReadBufferSize(size_t size);
+    void SetMaxSendQueueSize(size_t size);
+    
+    // 连接池管理
+    void SetMaxConnections(size_t max);
+    void SetHeartbeatInterval(int64_t interval_ms);
+    
+    // 连接超时管理
+    void SetConnectionReadTimeout(int64_t timeout_ms);
 };
 ```
 
@@ -86,13 +105,24 @@ WebSocket服务器实现：
 ```cpp
 class WebSocketServer : public Server {
 public:
-    WebSocketServer(uv_loop_t* loop);                    // 构造函数
+    WebSocketServer(uv_loop_t* loop, const ServerConfig& config = ServerConfig());  // 构造函数
     
     void SetOnOpen(CallbackOpen cb);                     // 设置连接打开回调
     void SetOnMessage(CallbackMessage cb);               // 设置消息回调
     void SetOnClose(CallbackClose cb);                   // 设置连接关闭回调
     
-    bool Start(const std::string& ip, int port, int thread_count);  // 启动服务器
+    bool Start(const std::string& ip, int port);  // 启动服务器
+    
+    // 缓冲区配置
+    void SetReadBufferSize(size_t size);
+    void SetMaxSendQueueSize(size_t size);
+    
+    // 连接池管理
+    void SetMaxConnections(size_t max);
+    void SetHeartbeatInterval(int64_t interval_ms);
+    
+    // 连接超时管理
+    void SetConnectionReadTimeout(int64_t timeout_ms);
 };
 ```
 
@@ -130,8 +160,8 @@ int main() {
         std::cout << "客户端断开: " << conn->GetIP() << std::endl;
     });
     
-    // 启动服务器，使用4个线程
-    if (!server.Start("0.0.0.0", 7000, 4)) {
+    // 启动服务器
+    if (!server.Start("0.0.0.0", 7000)) {
         std::cerr << "启动服务器失败！" << std::endl;
         return 1;
     }
@@ -164,7 +194,7 @@ int main() {
     });
     
     // 启动服务器
-    if (!server.Start("0.0.0.0", 7001, 1)) {
+    if (!server.Start("0.0.0.0", 7001)) {
         std::cerr << "启动UDP服务器失败！" << std::endl;
         return 1;
     }
@@ -217,7 +247,6 @@ int main() {
 
 - ✅ 高性能事件驱动模型
 - ✅ TCP、UDP和WebSocket服务器支持
-- ✅ 多线程TCP服务器
 - ✅ 内置发送缓冲队列
 - ✅ 统一的连接接口
 - ✅ 简洁易用的API

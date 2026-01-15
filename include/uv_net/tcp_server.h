@@ -27,19 +27,8 @@ public:
     void SetConfig(const ServerConfig& config) { config_ = config; }
     const ServerConfig& GetConfig() const { return config_; }
     
-    // 缓冲区配置
-    void SetReadBufferSize(size_t size) override { config_.SetReadBufferSize(size); }
-    void SetMaxSendQueueSize(size_t size) override { config_.SetMaxSendQueueSize(size); }
-    
-    // 连接池管理
-    void SetMaxConnections(size_t max) override { config_.SetMaxConnections(max); }
-    void SetHeartbeatInterval(int64_t interval_ms) override { config_.SetHeartbeatInterval(interval_ms); }
-    
-    // 连接读超时设置
-    void SetConnectionReadTimeout(int64_t timeout_ms) override { config_.SetConnectionReadTimeout(timeout_ms); }
-    
     // 协议解析器设置
-    void SetServerProtocol(std::shared_ptr<ServerProtocol> protocol) override { server_protocol_ = protocol; }
+    void SetServerProtocol(std::shared_ptr<ServerProtocol> protocol) { server_protocol_ = protocol; }
     
     // 获取配置（供Connection使用）
     size_t GetReadBufferSize() const { return config_.GetReadBufferSize(); }

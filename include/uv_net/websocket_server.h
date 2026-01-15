@@ -13,6 +13,7 @@ namespace uv_net {
 
 // WebSocket Server
 class WebSocketServer : public Server {
+    friend class WebSocketConnection;
 public:
     WebSocketServer(uv_loop_t* loop, const ServerConfig& config = ServerConfig());
     ~WebSocketServer();
@@ -23,33 +24,21 @@ public:
 
     bool Start(const std::string& ip, int port) override;
 
-    // 缓冲区配置
-    void SetReadBufferSize(size_t size) override { config_.SetReadBufferSize(size); }
-    void SetMaxSendQueueSize(size_t size) override { config_.SetMaxSendQueueSize(size); }
-    
-    // 连接池管理
-    void SetMaxConnections(size_t max) override { config_.SetMaxConnections(max); }
-    void SetHeartbeatInterval(int64_t interval_ms) override { config_.SetHeartbeatInterval(interval_ms); }
-    
-    // 连接超时管理
-    void SetConnectionReadTimeout(int64_t timeout_ms) override { config_.SetConnectionReadTimeout(timeout_ms); }
-    
     // 协议解析器设置
-    void SetServerProtocol(std::shared_ptr<ServerProtocol> protocol) override { server_protocol_ = protocol; }
+    void SetServerProtocol(std::shared_ptr<ServerProtocol> protocol) { server_protocol_ = protocol; }
     
     // 获取协议解析器
     std::shared_ptr<ServerProtocol> GetServerProtocol() const { return server_protocol_; }
 
+    // 获取配置（供Connection使用）
+    const ServerConfig& GetConfig() const;
+
+private:
     // 内部回调
     void OnNewConnection(std::shared_ptr<Connection> conn);
     void OnMessage(std::shared_ptr<Connection> conn, const char* data, size_t len);
     void OnClose(std::shared_ptr<Connection> conn);
     
-    // 获取配置（供Connection使用）
-    const ServerConfig& GetConfig() const;
-
-
-private:
     uv_loop_t* loop_;
     std::vector<uv_thread_t> threads_;
     std::vector<uv_loop_t*> loops_;

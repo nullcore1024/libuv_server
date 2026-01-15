@@ -34,13 +34,6 @@ int main() {
     ServerConfig runtime_config;
     TcpServer server3(loop, runtime_config);
     
-    // 运行时修改配置
-    server3.SetReadBufferSize(32768);          // 32KB读缓冲区
-    server3.SetWriteBufferSize(32768);         // 32KB写缓冲区
-    server3.SetMaxConnections(1000);           // 最大1000个连接
-    server3.SetConnectionReadTimeout(60000);   // 60秒读超时
-    server3.SetHeartbeatInterval(15000);       // 15秒心跳间隔
-    
     // 打印配置信息
     PLOG_INFO << "Server 1 Config:";
     PLOG_INFO << "  Read Buffer Size: " << server1.GetReadBufferSize();
