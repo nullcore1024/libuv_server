@@ -14,7 +14,29 @@ UdpServer::UdpServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop),
 void UdpServer::OnMessage(std::shared_ptr<Connection> conn, const char* data, size_t len) {
     if (on_message_) {
         PLOG_INFO << "UDP Server received message of " << len << " bytes";
-        on_message_(conn, data, len);
+        
+        // 获取协议解析器
+        auto protocol = GetServerProtocol();
+        
+        // 如果没有配置协议解析器，直接调用OnMessage
+        if (!protocol) {
+            on_message_(conn, data, len);
+            return;
+        }
+        
+        // 使用协议解析器解析数据
+        int package_len = 0;
+        int msg_len = 0;
+        PackageStatus status = protocol->ParsePackage(data, len, package_len, msg_len);
+        
+        if (status == PackageFull) {
+            // 完整包，调用OnMessage
+            on_message_(conn, data, package_len);
+        } else if (status == PackageError) {
+            // 包错误，打印日志
+            PLOG_ERROR << "UDP Server package parse error";
+        }
+        // PackageLess状态不处理，因为UDP是无连接的，数据包是完整的
     }
 }
 

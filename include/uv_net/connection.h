@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <plog/Log.h>
+#include "server_protocol.h"
 
 namespace uv_net {
 
@@ -38,6 +39,9 @@ public:
     virtual void SetOnMessage(CallbackMessage cb) = 0;
     virtual void SetOnClose(CallbackClose cb) = 0;
     virtual bool Start(const std::string& ip, int port) = 0;
+    
+    // 协议解析器设置
+    virtual void SetServerProtocol(std::shared_ptr<ServerProtocol> protocol) = 0;
     
     // 缓冲区配置
     virtual void SetReadBufferSize(size_t size) = 0;

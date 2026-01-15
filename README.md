@@ -11,6 +11,8 @@ libuv_server基于libuv的事件驱动模型构建，主要包含以下核心组
 2. **连接管理**：封装TCP和UDP连接，提供统一的连接接口
 3. **多线程支持**：TCP服务器支持多线程处理连接请求
 4. **发送缓冲**：TCP连接内置发送队列，支持高频发送操作
+5. **连接ID分配**：为每个TCP/WebSocket连接分配唯一的连接ID，方便日志追踪和调试
+6. **优雅退出**：支持USR1信号触发的优雅退出，确保资源正确释放
 
 ### 架构图
 
@@ -42,6 +44,7 @@ public:
     virtual void Close() = 0;                            // 关闭连接
     virtual std::string GetIP() = 0;                     // 获取客户端IP
     virtual int GetPort() = 0;                           // 获取客户端端口
+    virtual uint32_t GetConnId() = 0;                    // 获取连接ID
 };
 ```
 
@@ -219,6 +222,8 @@ int main() {
 - ✅ 统一的连接接口
 - ✅ 简洁易用的API
 - ✅ 跨平台支持
+- ✅ 连接ID分配与追踪
+- ✅ USR1信号优雅退出支持
 
 ## 测试
 
@@ -232,6 +237,27 @@ Escape character is '^]'.
 Welcome! Type something.
 Hello
 Hello
+```
+
+### 优雅退出测试
+```bash
+# 启动服务器
+$ ./echo_server
+
+# 另开一个终端，获取服务器进程ID
+$ ps aux | grep echo_server
+
+# 发送USR1信号触发优雅退出
+$ kill -USR1 <server_pid>
+
+# 服务器会输出以下日志并退出
+Received SIGUSR1 signal, exiting gracefully...
+UDP Server destroying
+UDP Server destroyed
+WebSocket Server destroying
+WebSocket Server destroyed
+TCP Server destroying
+TCP Server destroyed
 ```
 
 ### 测试UDP功能

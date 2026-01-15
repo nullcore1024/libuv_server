@@ -4,8 +4,10 @@
 #include "connection.h"
 #include "server_config.h"
 #include "tcp_connection.h"
+#include "server_protocol.h"
 #include <vector>
 #include <atomic>
+#include <memory>
 
 namespace uv_net {
 
@@ -36,6 +38,9 @@ public:
     // 连接读超时设置
     void SetConnectionReadTimeout(size_t timeout_ms) override { config_.SetConnectionReadTimeout(timeout_ms); }
     
+    // 协议解析器设置
+    void SetServerProtocol(std::shared_ptr<ServerProtocol> protocol) override { server_protocol_ = protocol; }
+    
     // 获取配置（供Connection使用）
     size_t GetReadBufferSize() const { return config_.GetReadBufferSize(); }
     size_t GetWriteBufferSize() const { return config_.GetWriteBufferSize(); }
@@ -43,6 +48,9 @@ public:
     size_t GetMaxConnections() const { return config_.GetMaxConnections(); }
     size_t GetHeartbeatInterval() const { return config_.GetHeartbeatInterval(); }
     size_t GetConnectionReadTimeout() const { return config_.GetConnectionReadTimeout(); }
+    
+    // 获取协议解析器
+    std::shared_ptr<ServerProtocol> GetServerProtocol() const { return server_protocol_; }
 
     // 内部回调
     void OnNewConnection(std::shared_ptr<Connection> conn);
@@ -61,6 +69,9 @@ private:
     
     // 配置
     ServerConfig config_;
+    
+    // 协议解析器
+    std::shared_ptr<ServerProtocol> server_protocol_;
     
     // 连接计数
     std::atomic<size_t> current_connections_{0}; // 当前连接数

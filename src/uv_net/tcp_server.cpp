@@ -120,7 +120,7 @@ bool TcpServer::Start(const std::string& ip, int port) {
                     TcpConnection* conn = (TcpConnection*)stream->data;
                     if (nread > 0) {
                         PLOG_INFO << "TCP Server received " << nread << " bytes from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << ")";
-                        conn->server_->OnMessage(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}), buf->base, nread);
+                        conn->OnDataReceived(buf->base, nread);
                     } else {
                         if (nread != UV_EOF && nread != UV_ECONNRESET) {
                             PLOG_ERROR << "TCP Server read error from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << "):" << uv_strerror(nread);

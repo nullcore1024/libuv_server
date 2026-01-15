@@ -1,5 +1,6 @@
 #include "uv_net/tcp_connection.h"
 #include "uv_net/tcp_server.h"
+#include "server_protocol.h"
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
@@ -216,5 +217,50 @@ void TcpConnection::OnHeartbeatTimeout() {
 std::string TcpConnection::GetIP() { return ip_; }
 int TcpConnection::GetPort() { return port_; }
 uint32_t TcpConnection::GetConnId() { return conn_id_; }
+
+void TcpConnection::OnDataReceived(const char* data, size_t len) {
+    // 更新最后活跃时间
+    last_active_time_ = uv_now(uv_default_loop());
+    
+    std::lock_guard<std::mutex> lock(recv_mutex_);
+    
+    // 将新数据添加到接收缓冲区
+    recv_buffer_.append(data, len);
+    
+    // 获取协议解析器
+    auto protocol = server_->GetServerProtocol();
+    
+    // 如果没有配置协议解析器，直接调用OnMessage
+    if (!protocol) {
+        server_->OnMessage(std::shared_ptr<TcpConnection>(this, [](TcpConnection*){}), recv_buffer_.data(), recv_buffer_.size());
+        recv_buffer_.clear();
+        return;
+    }
+    
+    // 使用协议解析器解析数据
+    while (!recv_buffer_.empty()) {
+        int package_len = 0;
+        int msg_len = 0;
+        
+        // 调用协议解析器解析包
+        PackageStatus status = protocol->ParsePackage(recv_buffer_.data(), recv_buffer_.size(), package_len, msg_len);
+        
+        if (status == PackageFull) {
+            // 完整包，调用OnMessage
+            server_->OnMessage(std::shared_ptr<TcpConnection>(this, [](TcpConnection*){}), recv_buffer_.data(), package_len);
+            
+            // 移除已处理的数据
+            recv_buffer_.erase(0, package_len);
+        } else if (status == PackageLess) {
+            // 数据不足，等待更多数据
+            break;
+        } else {
+            // 包错误，关闭连接
+            PLOG_ERROR << "TCP Connection " << conn_id_ << " package parse error, closing connection";
+            Close();
+            break;
+        }
+    }
+}
 
 } // namespace uv_net

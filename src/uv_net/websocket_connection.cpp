@@ -373,14 +373,60 @@ void WebSocketConnection::ParseFrame(const char* data, size_t len) {
 void WebSocketConnection::ProcessTextFrame(const char* data, size_t len) {
     if (server_ && state_ == State::OPEN) {
         std::shared_ptr<WebSocketConnection> shared_conn(this, [](WebSocketConnection*){});
-        server_->OnMessage(shared_conn, data, len);
+        
+        // 获取协议解析器
+        auto protocol = server_->GetServerProtocol();
+        
+        // 如果没有配置协议解析器，直接调用OnMessage
+        if (!protocol) {
+            server_->OnMessage(shared_conn, data, len);
+            return;
+        }
+        
+        // 使用协议解析器解析数据
+        int package_len = 0;
+        int msg_len = 0;
+        PackageStatus status = protocol->ParsePackage(data, len, package_len, msg_len);
+        
+        if (status == PackageFull) {
+            // 完整包，调用OnMessage
+            server_->OnMessage(shared_conn, data, package_len);
+        } else if (status == PackageError) {
+            // 包错误，关闭连接
+            PLOG_ERROR << "WebSocket Connection " << conn_id_ << " package parse error, closing connection";
+            Close();
+        }
+        // PackageLess状态不处理，因为WebSocket是完整帧传输
     }
 }
 
 void WebSocketConnection::ProcessBinaryFrame(const char* data, size_t len) {
     if (server_ && state_ == State::OPEN) {
         std::shared_ptr<WebSocketConnection> shared_conn(this, [](WebSocketConnection*){});
-        server_->OnMessage(shared_conn, data, len);
+        
+        // 获取协议解析器
+        auto protocol = server_->GetServerProtocol();
+        
+        // 如果没有配置协议解析器，直接调用OnMessage
+        if (!protocol) {
+            server_->OnMessage(shared_conn, data, len);
+            return;
+        }
+        
+        // 使用协议解析器解析数据
+        int package_len = 0;
+        int msg_len = 0;
+        PackageStatus status = protocol->ParsePackage(data, len, package_len, msg_len);
+        
+        if (status == PackageFull) {
+            // 完整包，调用OnMessage
+            server_->OnMessage(shared_conn, data, package_len);
+        } else if (status == PackageError) {
+            // 包错误，关闭连接
+            PLOG_ERROR << "WebSocket Connection " << conn_id_ << " package parse error, closing connection";
+            Close();
+        }
+        // PackageLess状态不处理，因为WebSocket是完整帧传输
     }
 }
 
@@ -418,9 +464,6 @@ void WebSocketConnection::Send(const char* data, size_t len) {
     
     PLOG_INFO << "WebSocket Connection sending message of " << len << " bytes";
     SendFrame(data, len, 0x01); // 默认发送文本帧
-    
-    // 更新最后活跃时间
-    last_active_time_ = uv_now(uv_default_loop());
 }
 
 void WebSocketConnection::OnWriteComplete(int status) {
@@ -433,9 +476,6 @@ void WebSocketConnection::OnWriteComplete(int status) {
     }
     
     PLOG_INFO << "WebSocket Connection write complete";
-    
-    // 更新最后活跃时间
-    last_active_time_ = uv_now(uv_default_loop());
     
     // 写成功，重置标志
     is_writing_ = false;
