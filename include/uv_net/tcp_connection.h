@@ -4,6 +4,7 @@
 #include "connection.h"
 #include <queue>
 #include <mutex>
+#include <cstdint>
 
 namespace uv_net {
 
@@ -53,7 +54,8 @@ private:
     
     // 心跳相关
     uv_timer_t heartbeat_timer_;
-    size_t last_active_time_; // 上次活跃时间（毫秒）
+    int64_t last_active_time_; // 上次活跃时间（毫秒）
+    int64_t create_time_; // 创建时间（毫秒）
     bool is_heartbeat_running_;
     
     // 接收缓冲区，用于协议解析

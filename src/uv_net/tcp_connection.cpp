@@ -14,6 +14,9 @@ TcpConnection::TcpConnection(TcpServer* server)
     // 初始化心跳定时器
     uv_timer_init(uv_default_loop(), &heartbeat_timer_);
     heartbeat_timer_.data = this;
+    // 记录创建时间
+    create_time_ = uv_now(uv_default_loop());
+    last_active_time_ = create_time_;
     PLOG_INFO << "TCP Connection created";
 }
 
@@ -126,7 +129,10 @@ void TcpConnection::OnWriteComplete(int status) {
             // 发送队列已空，执行实际关闭
             uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
                 TcpConnection* conn = static_cast<TcpConnection*>(handle->data);
-                PLOG_INFO << "TCP Connection " << conn->conn_id_ << " closed gracefully";
+                // 计算在线时长（秒）
+                size_t now = uv_now(uv_default_loop());
+                double online_seconds = (now - conn->create_time_) / 1000.0;
+                PLOG_INFO << "TCP Connection " << conn->conn_id_ << " closed gracefully, online time: " << online_seconds << " seconds";
                 // 触发用户层的 OnClose
                 if (conn->server_) {
                     conn->server_->OnClose(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}));
@@ -159,14 +165,17 @@ void TcpConnection::Close() {
         
         // 关闭 handle，触发 close 回调
         uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
-            TcpConnection* conn = static_cast<TcpConnection*>(handle->data);
-            PLOG_INFO << "TCP Connection " << conn->conn_id_ << " closed immediately";
-            // 触发用户层的 OnClose
-            if (conn->server_) {
-                conn->server_->OnClose(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}));
-            }
-            delete conn; // 最终释放 Connection 对象
-        });
+                TcpConnection* conn = static_cast<TcpConnection*>(handle->data);
+                // 计算在线时长（秒）
+                size_t now = uv_now(uv_default_loop());
+                double online_seconds = (now - conn->create_time_) / 1000.0;
+                PLOG_INFO << "TCP Connection " << conn->conn_id_ << " closed immediately, online time: " << online_seconds << " seconds";
+                // 触发用户层的 OnClose
+                if (conn->server_) {
+                    conn->server_->OnClose(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}));
+                }
+                delete conn; // 最终释放 Connection 对象
+            });
     } else {
         // 发送队列不为空，执行优雅关闭
         is_closing_gracefully_ = true;

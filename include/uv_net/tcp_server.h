@@ -33,10 +33,10 @@ public:
     
     // 连接池管理
     void SetMaxConnections(size_t max) override { config_.SetMaxConnections(max); }
-    void SetHeartbeatInterval(size_t interval_ms) override { config_.SetHeartbeatInterval(interval_ms); }
+    void SetHeartbeatInterval(int64_t interval_ms) override { config_.SetHeartbeatInterval(interval_ms); }
     
     // 连接读超时设置
-    void SetConnectionReadTimeout(size_t timeout_ms) override { config_.SetConnectionReadTimeout(timeout_ms); }
+    void SetConnectionReadTimeout(int64_t timeout_ms) override { config_.SetConnectionReadTimeout(timeout_ms); }
     
     // 协议解析器设置
     void SetServerProtocol(std::shared_ptr<ServerProtocol> protocol) override { server_protocol_ = protocol; }
@@ -46,8 +46,8 @@ public:
     size_t GetWriteBufferSize() const { return config_.GetWriteBufferSize(); }
     size_t GetMaxSendQueueSize() const { return config_.GetMaxSendQueueSize(); }
     size_t GetMaxConnections() const { return config_.GetMaxConnections(); }
-    size_t GetHeartbeatInterval() const { return config_.GetHeartbeatInterval(); }
-    size_t GetConnectionReadTimeout() const { return config_.GetConnectionReadTimeout(); }
+    int64_t GetHeartbeatInterval() const { return config_.GetHeartbeatInterval(); }
+    int64_t GetConnectionReadTimeout() const { return config_.GetConnectionReadTimeout(); }
     
     // 获取协议解析器
     std::shared_ptr<ServerProtocol> GetServerProtocol() const { return server_protocol_; }

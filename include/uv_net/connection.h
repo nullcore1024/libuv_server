@@ -49,10 +49,10 @@ public:
     
     // 连接池管理
     virtual void SetMaxConnections(size_t max) = 0;
-    virtual void SetHeartbeatInterval(size_t interval_ms) = 0;
+    virtual void SetHeartbeatInterval(int64_t interval_ms) = 0;
     
     // 连接超时管理
-    virtual void SetConnectionReadTimeout(size_t timeout_ms) = 0;
+    virtual void SetConnectionReadTimeout(int64_t timeout_ms) = 0;
 };
 
 } // namespace uv_net

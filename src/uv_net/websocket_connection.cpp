@@ -69,6 +69,10 @@ WebSocketConnection::WebSocketConnection(WebSocketServer* server)
     uv_timer_init(uv_default_loop(), &heartbeat_timer_);
     heartbeat_timer_.data = this;
     
+    // 记录创建时间
+    create_time_ = uv_now(uv_default_loop());
+    last_active_time_ = create_time_;
+    
     PLOG_INFO << "WebSocket Connection created";
 }
 
@@ -492,7 +496,10 @@ void WebSocketConnection::OnWriteComplete(int status) {
             uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
                 WebSocketConnection* conn = static_cast<WebSocketConnection*>(handle->data);
                 conn->state_ = State::CLOSED;
-                PLOG_INFO << "WebSocket Connection closed gracefully";
+                // 计算在线时长（秒）
+                size_t now = uv_now(uv_default_loop());
+                double online_seconds = (now - conn->create_time_) / 1000.0;
+                PLOG_INFO << "WebSocket Connection " << conn->conn_id_ << " closed gracefully, online time: " << online_seconds << " seconds";
                 // 触发用户层的 OnClose
                 if (conn->server_) {
                     std::shared_ptr<WebSocketConnection> shared_conn(conn, [](WebSocketConnection*){});
@@ -528,7 +535,10 @@ void WebSocketConnection::Close() {
         uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
             WebSocketConnection* conn = static_cast<WebSocketConnection*>(handle->data);
             conn->state_ = State::CLOSED;
-            PLOG_INFO << "WebSocket Connection closed immediately";
+            // 计算在线时长（秒）
+            size_t now = uv_now(uv_default_loop());
+            double online_seconds = (now - conn->create_time_) / 1000.0;
+            PLOG_INFO << "WebSocket Connection " << conn->conn_id_ << " closed immediately, online time: " << online_seconds << " seconds";
             // 触发用户层的 OnClose
             if (conn->server_) {
                 std::shared_ptr<WebSocketConnection> shared_conn(conn, [](WebSocketConnection*){});

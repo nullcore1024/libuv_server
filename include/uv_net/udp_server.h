@@ -29,10 +29,10 @@ public:
     
     // 连接池管理
     void SetMaxConnections(size_t max) override { config_.SetMaxConnections(max); }
-    void SetHeartbeatInterval(size_t interval_ms) override { config_.SetHeartbeatInterval(interval_ms); }
+    void SetHeartbeatInterval(int64_t interval_ms) override { config_.SetHeartbeatInterval(interval_ms); }
     
     // 连接超时管理
-    void SetConnectionReadTimeout(size_t timeout_ms) override { config_.SetConnectionReadTimeout(timeout_ms); }
+    void SetConnectionReadTimeout(int64_t timeout_ms) override { config_.SetConnectionReadTimeout(timeout_ms); }
     
     // 协议解析器设置
     void SetServerProtocol(std::shared_ptr<ServerProtocol> protocol) override { server_protocol_ = protocol; }

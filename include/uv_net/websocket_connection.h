@@ -5,6 +5,7 @@
 #include <queue>
 #include <mutex>
 #include <vector>
+#include <cstdint>
 
 namespace uv_net {
 
@@ -90,7 +91,8 @@ private:
     
     // 心跳相关
     uv_timer_t heartbeat_timer_;
-    size_t last_active_time_;
+    int64_t last_active_time_;
+    int64_t create_time_; // 创建时间（毫秒）
     bool is_heartbeat_running_;
     
     // 内部方法

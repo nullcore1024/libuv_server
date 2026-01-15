@@ -2,6 +2,7 @@
 #define UV_NET_SERVER_CONFIG_H
 
 #include <cstddef>
+#include <cstdint>
 
 namespace uv_net {
 
@@ -34,20 +35,20 @@ public:
     size_t GetMaxSendQueueSize() const { return max_send_queue_size_; }
 
     // 连接读超时设置（毫秒）
-    void SetConnectionReadTimeout(size_t timeout_ms) { connection_read_timeout_ = timeout_ms; }
-    size_t GetConnectionReadTimeout() const { return connection_read_timeout_; }
+    void SetConnectionReadTimeout(int64_t timeout_ms) { connection_read_timeout_ = timeout_ms; }
+    int64_t GetConnectionReadTimeout() const { return connection_read_timeout_; }
 
     // 心跳间隔设置（毫秒）
-    void SetHeartbeatInterval(size_t interval_ms) { heartbeat_interval_ = interval_ms; }
-    size_t GetHeartbeatInterval() const { return heartbeat_interval_; }
+    void SetHeartbeatInterval(int64_t interval_ms) { heartbeat_interval_ = interval_ms; }
+    int64_t GetHeartbeatInterval() const { return heartbeat_interval_; }
 
 private:
     size_t read_buffer_size_;          // 读缓冲区大小
     size_t write_buffer_size_;         // 写缓冲区大小
     size_t max_connections_;           // 最大连接数
     size_t max_send_queue_size_;       // 最大发送队列大小
-    size_t connection_read_timeout_;   // 连接读超时（毫秒）
-    size_t heartbeat_interval_;        // 心跳间隔（毫秒）
+    int64_t connection_read_timeout_;   // 连接读超时（毫秒）
+    int64_t heartbeat_interval_;        // 心跳间隔（毫秒）
 };
 
 } // namespace uv_net
