@@ -43,9 +43,12 @@ public:
     std::shared_ptr<ServerProtocol> GetServerProtocol() const { return server_protocol_; }
 
     // 内部回调
-    void OnNewConnection(std::shared_ptr<Connection> conn);
-    void OnMessage(std::shared_ptr<Connection> conn, const char* data, size_t len);
-    void OnClose(std::shared_ptr<Connection> conn);
+    virtual void OnNewConnection(std::shared_ptr<Connection> conn);
+    virtual void OnMessage(std::shared_ptr<Connection> conn, const char* data, size_t len);
+    virtual void OnClose(std::shared_ptr<Connection> conn);
+    
+    // 创建连接对象的虚函数，供子类重写
+    virtual TcpConnection* CreateConnection(TcpServer* server);
 
 private:
     uv_loop_t* loop_;

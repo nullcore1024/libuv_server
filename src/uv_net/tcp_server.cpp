@@ -55,6 +55,11 @@ void TcpServer::OnClose(std::shared_ptr<Connection> conn) {
     }
 }
 
+// CreateConnection的默认实现，创建TcpConnection对象
+TcpConnection* TcpServer::CreateConnection(TcpServer* server) {
+    return new TcpConnection(server);
+}
+
 bool TcpServer::Start(const std::string& ip, int port) {
     PLOG_INFO << "TCP Server starting on " << ip << ":" << port;
     
@@ -89,7 +94,7 @@ bool TcpServer::Start(const std::string& ip, int port) {
         }
         
         PLOG_INFO << "TCP Server new connection incoming";
-        TcpConnection* conn = new TcpConnection(tcp_server);
+        TcpConnection* conn = tcp_server->CreateConnection(tcp_server);
         uv_tcp_init(server->loop, &conn->handle_);
 
         if (uv_accept(server, (uv_stream_t*)&conn->handle_) == 0) {

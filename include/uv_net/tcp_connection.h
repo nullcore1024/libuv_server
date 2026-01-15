@@ -3,6 +3,7 @@
 
 #include "connection.h"
 #include <queue>
+#include <mutex>
 #include <cstdint>
 
 namespace uv_net {
@@ -31,14 +32,14 @@ public:
     uint32_t GetConnId() override;
 
     // 内部逻辑
-    void TrySend();
-    void OnWriteComplete(int status);
-    void StartHeartbeat();
-    void StopHeartbeat();
-    void OnHeartbeatTimeout();
-    void OnDataReceived(const char* data, size_t len); // 处理接收到的数据
+    virtual void TrySend();
+    virtual void OnWriteComplete(int status);
+    virtual void StartHeartbeat();
+    virtual void StopHeartbeat();
+    virtual void OnHeartbeatTimeout();
+    virtual void OnDataReceived(const char* data, size_t len); // 处理接收到的数据
 
-private:
+protected:
     // 写请求结构体，携带数据缓冲区
     struct WriteReq {
         uv_write_t req;
@@ -47,6 +48,7 @@ private:
 
     std::queue<std::string> send_queue_;
     bool is_writing_;
+    std::mutex send_mutex_; // 添加发送锁，用于保护send_queue_和is_writing_
     
     // 心跳相关
     uv_timer_t heartbeat_timer_;

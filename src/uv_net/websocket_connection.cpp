@@ -58,20 +58,13 @@ static std::string Base64Encode(const unsigned char* data, size_t len) {
 }
 
 WebSocketConnection::WebSocketConnection(WebSocketServer* server)
-    : server_(server), port_(0), conn_id_(0), state_(State::HANDSHAKE),
+    : TcpConnection(server), state_(State::HANDSHAKE),
       parse_state_(ParseState::READ_HEADER), current_frame_(),
-      bytes_read_(0), is_writing_(false), is_closing_gracefully_(false),
-      is_heartbeat_running_(false) {
-    handle_.data = this;
+      bytes_read_(0) {
+    // 将服务器指针转换为WebSocketServer类型
+    server_ = server;
+    
     memset(&current_frame_, 0, sizeof(current_frame_));
-    
-    // 初始化心跳定时器
-    uv_timer_init(uv_default_loop(), &heartbeat_timer_);
-    heartbeat_timer_.data = this;
-    
-    // 记录创建时间
-    create_time_ = uv_now(uv_default_loop());
-    last_active_time_ = create_time_;
     
     PLOG_INFO << "WebSocket Connection created";
 }
@@ -594,8 +587,23 @@ void WebSocketConnection::OnHeartbeatTimeout() {
     // 否则，继续等待下一次心跳检查
 }
 
-std::string WebSocketConnection::GetIP() { return ip_; }
-int WebSocketConnection::GetPort() { return port_; }
-uint32_t WebSocketConnection::GetConnId() { return conn_id_; }
+void WebSocketConnection::OnDataReceived(const char* data, size_t len) {
+    PLOG_INFO << "WebSocket Connection received data of " << len << " bytes, state: " << static_cast<int>(state_);
+    
+    if (state_ == State::HANDSHAKE) {
+        // 处理握手数据
+        handshake_buffer_.insert(handshake_buffer_.end(), data, data + len);
+        
+        // 检查是否接收到完整的握手请求
+        if (std::search(handshake_buffer_.begin(), handshake_buffer_.end(), "\r\n\r\n", "\r\n\r\n" + 4) != handshake_buffer_.end()) {
+            // 将 vector<char> 转换为 string 传递给 ParseHandshake
+            std::string handshake_str(handshake_buffer_.begin(), handshake_buffer_.end());
+            ParseHandshake(handshake_str);
+        }
+    } else {
+        // 处理 WebSocket 帧
+        ParseFrame(data, len);
+    }
+}
 
 } // namespace uv_net
