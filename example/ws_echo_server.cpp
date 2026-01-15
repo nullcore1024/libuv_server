@@ -40,7 +40,7 @@ int main() {
     });
 
     // 启动 WebSocket 服务器
-    if (!ws_server.Start("0.0.0.0", 8080, 1)) {
+    if (!ws_server.Start("0.0.0.0", 8080)) {
         PLOG_ERROR << "Failed to start WebSocket server";
         return 1;
     }

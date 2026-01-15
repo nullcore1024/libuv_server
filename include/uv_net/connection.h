@@ -36,7 +36,7 @@ public:
     virtual void SetOnOpen(CallbackOpen cb) = 0;
     virtual void SetOnMessage(CallbackMessage cb) = 0;
     virtual void SetOnClose(CallbackClose cb) = 0;
-    virtual bool Start(const std::string& ip, int port, int thread_count) = 0;
+    virtual bool Start(const std::string& ip, int port) = 0;
 };
 
 } // namespace uv_net

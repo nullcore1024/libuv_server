@@ -34,73 +34,7 @@ void TcpServer::OnNewConnection(std::shared_ptr<Connection> conn) { if (on_open_
 void TcpServer::OnMessage(std::shared_ptr<Connection> conn, const char* data, size_t len) { if (on_message_) on_message_(conn, data, len); }
 void TcpServer::OnClose(std::shared_ptr<Connection> conn) { if (on_close_) on_close_(conn); }
 
-struct TcpThreadData {
-    uv_loop_t* loop;
-    TcpServer* server;
-    std::string ip;
-    int port;
-};
-
-static void TcpThreadEntry(void* arg) {
-    TcpThreadData* data = (TcpThreadData*)arg;
-    uv_tcp_t* listener = new uv_tcp_t();
-    uv_tcp_init(data->loop, listener);
-    SetReusePort((uv_handle_t*)listener);
-
-    struct sockaddr_in addr;
-    uv_ip4_addr(data->ip.c_str(), data->port, &addr);
-
-    if (uv_tcp_bind(listener, (const struct sockaddr*)&addr, 0) != 0) return;
-
-    listener->data = data->server;
-
-    uv_listen((uv_stream_t*)listener, 128, [](uv_stream_t* server, int status) {
-        if (status < 0) return;
-        TcpServer* tcp_server = (TcpServer*)server->data;
-        TcpConnection* conn = new TcpConnection(tcp_server);
-        uv_tcp_init(server->loop, &conn->handle_);
-
-        if (uv_accept(server, (uv_stream_t*)&conn->handle_) == 0) {
-            struct sockaddr_storage peer;
-            int namelen = sizeof(peer);
-            uv_tcp_getpeername(&conn->handle_, (struct sockaddr*)&peer, &namelen);
-            conn->ip_ = (peer.ss_family == AF_INET) ? 
-                std::string(inet_ntoa(((struct sockaddr_in*)&peer)->sin_addr)) : "Unknown";
-            conn->port_ = (peer.ss_family == AF_INET) ? 
-                ntohs(((struct sockaddr_in*)&peer)->sin_port) : 0;
-
-            uv_read_start((uv_stream_t*)&conn->handle_, 
-                [](uv_handle_t* h, size_t suggested_size, uv_buf_t* buf) {
-                    buf->base = new char[suggested_size];
-                    buf->len = suggested_size;
-                },
-                [](uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
-                    TcpConnection* conn = (TcpConnection*)stream->data;
-                    if (nread > 0) {
-                        conn->server_->OnMessage(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}), buf->base, nread);
-                    } else {
-                        if (nread != UV_EOF && nread != UV_ECONNRESET) {
-                            // std::cerr << "Read error: " << uv_strerror(nread) << std::endl;
-                        }
-                        uv_close((uv_handle_t*)stream, nullptr); // Close 由 read error 触发，逻辑在 Close() 内部处理
-                    }
-                    delete[] buf->base;
-                }
-            );
-
-            std::shared_ptr<Connection> shared_conn(conn, [](TcpConnection*){});
-            tcp_server->OnNewConnection(shared_conn);
-        } else {
-            uv_close((uv_handle_t*)&conn->handle_, nullptr);
-            delete conn;
-        }
-    });
-
-    uv_run(data->loop, UV_RUN_DEFAULT);
-    delete data;
-}
-
-bool TcpServer::Start(const std::string& ip, int port, int thread_count) {
+bool TcpServer::Start(const std::string& ip, int port) {
     PLOG_INFO << "TCP Server starting on " << ip << ":" << port;
     
     // 单线程模式：直接使用传入的loop，不创建额外线程

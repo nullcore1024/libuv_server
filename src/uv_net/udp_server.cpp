@@ -28,7 +28,7 @@ UdpServer::~UdpServer() {
     PLOG_INFO << "UDP Server destroyed";
 }
 
-bool UdpServer::Start(const std::string& ip, int port, int thread_count) {
+bool UdpServer::Start(const std::string& ip, int port) {
     PLOG_INFO << "UDP Server starting on " << ip << ":" << port;
     
     // 单线程模式：直接使用传入的loop

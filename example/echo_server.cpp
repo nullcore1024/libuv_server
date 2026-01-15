@@ -58,7 +58,7 @@ int main() {
     });
 
     // 启动 TCP，使用单线程模式
-    if (!tcp_server.Start("0.0.0.0", 7000, 1)) {
+    if (!tcp_server.Start("0.0.0.0", 7000)) {
         PLOG_ERROR << "Failed to start TCP server";
         return 1;
     }
@@ -69,7 +69,7 @@ int main() {
         PLOG_DEBUG << "[UDP] " << conn->GetIP() << ":" << conn->GetPort() << " -> " << std::string(data, len);
         conn->Send(data, len);
     });
-    if (!udp_server.Start("0.0.0.0", 7001, 1)) {
+    if (!udp_server.Start("0.0.0.0", 7001)) {
         PLOG_ERROR << "Failed to start UDP server";
     }
 
@@ -97,7 +97,7 @@ int main() {
                   << " (Total: " << connection_count << ")";
     });
 
-    if (!ws_server.Start("0.0.0.0", 8080, 1)) {
+    if (!ws_server.Start("0.0.0.0", 8080)) {
         PLOG_ERROR << "Failed to start WebSocket server";
     }
 

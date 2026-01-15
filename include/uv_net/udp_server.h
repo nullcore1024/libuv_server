@@ -17,7 +17,7 @@ public:
     void SetOnMessage(CallbackMessage cb) override { on_message_ = cb; }
     void SetOnClose(CallbackClose cb) override { on_close_ = cb; }
 
-    bool Start(const std::string& ip, int port, int thread_count) override;
+    bool Start(const std::string& ip, int port) override;
     void OnMessage(std::shared_ptr<Connection> conn, const char* data, size_t len);
 
 private:

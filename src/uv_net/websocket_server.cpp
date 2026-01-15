@@ -45,7 +45,7 @@ void WebSocketServer::OnClose(std::shared_ptr<Connection> conn) {
     if (on_close_) on_close_(conn); 
 }
 
-bool WebSocketServer::Start(const std::string& ip, int port, int thread_count) {
+bool WebSocketServer::Start(const std::string& ip, int port) {
     PLOG_INFO << "WebSocket Server starting on " << ip << ":" << port;
     
     // 单线程模式：直接使用传入的loop
