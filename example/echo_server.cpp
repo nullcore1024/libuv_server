@@ -106,12 +106,27 @@ int main() {
     PLOG_DEBUG << "Use WebSocket client to connect to ws://0.0.0.0:8080";
     PLOG_DEBUG << "Press Enter to exit...";
 
-    // 创建一个异步句柄来处理用户输入
+    // 创建一个异步句柄来处理退出信号
     uv_async_t async;
     uv_async_init(loop, &async, [](uv_async_t* handle) {
-        // 用户按下了Enter键，停止事件循环
+        // 用户按下了Enter键或收到了USR1信号，停止事件循环
         uv_stop(handle->loop);
     });
+
+    // 设置USR1信号处理
+    uv_signal_t sig;
+    uv_signal_init(loop, &sig);
+    uv_signal_start(&sig, [](uv_signal_t* handle, int signum) {
+        if (signum == SIGUSR1) {
+            PLOG_INFO << "Received SIGUSR1 signal, exiting gracefully...";
+            // 获取async句柄指针
+            uv_async_t* async = static_cast<uv_async_t*>(handle->data);
+            // 通知事件循环退出
+            uv_async_send(async);
+        }
+    }, SIGUSR1);
+    // 将async句柄指针存储到signal句柄的data字段中
+    sig.data = &async;
 
     // 在另一个线程中等待用户输入
     std::thread([&async]() {
@@ -123,6 +138,8 @@ int main() {
     // 运行事件循环（TCP和UDP服务器都依赖它）
     uv_run(loop, UV_RUN_DEFAULT);
 
+    // 清理信号句柄
+    uv_close((uv_handle_t*)&sig, nullptr);
     // 清理异步句柄
     uv_close((uv_handle_t*)&async, nullptr);
     uv_run(loop, UV_RUN_ONCE);

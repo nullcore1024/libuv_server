@@ -2,14 +2,13 @@
 #include <uv.h>
 #include "uv_net/tcp_server.h"
 #include "uv_net/server_config.h"
-#include "plog/Log.h"
-#include "plog/Initializers/RollingFileInitializer.h"
+#include "Logger.h"
 
 using namespace uv_net;
 
 int main() {
     // 初始化日志
-    plog::init(plog::debug, "config_example.log");
+    LogInit(plog::debug,  1<< 26, 7);
     
     // 创建默认事件循环
     uv_loop_t* loop = uv_default_loop();
