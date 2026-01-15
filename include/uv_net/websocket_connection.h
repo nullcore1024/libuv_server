@@ -50,7 +50,7 @@ public:
     int port_;
     uint32_t conn_id_; // 连接ID
     State state_;
-    std::string handshake_buffer_;
+    std::vector<char> handshake_buffer_;
 
 private:
     // WebSocket 帧结构

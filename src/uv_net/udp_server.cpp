@@ -7,7 +7,7 @@
 
 namespace uv_net {
 
-UdpServer::UdpServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop), config_(config) {
+UdpServer::UdpServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop), config_(config), buffer_pool_(config.GetReadBufferSize()) {
     PLOG_INFO << "UDP Server created";
 } // 构造函数，接受loop和config参数
 
@@ -70,8 +70,10 @@ bool UdpServer::Start(const std::string& ip, int port) {
     
     uv_udp_recv_start(socket, 
         [](uv_handle_t* handle, size_t suggested_size, uv_buf_t* buf) {
-            buf->base = new char[suggested_size];
-            buf->len = suggested_size;
+            UdpServer* server = (UdpServer*)handle->data;
+            // 从缓冲区池获取缓冲区
+            buf->base = server->buffer_pool_.AcquireBuffer();
+            buf->len = server->GetReadBufferSize();
         },
         [](uv_udp_t* socket, ssize_t nread, const uv_buf_t* buf, const struct sockaddr* addr, unsigned flags) {
             if (nread > 0 && addr) {
@@ -82,7 +84,9 @@ bool UdpServer::Start(const std::string& ip, int port) {
             } else if (nread < 0) {
                 PLOG_ERROR << "UDP Server recv error: " << uv_strerror(nread);
             }
-            delete[] buf->base;
+            // 归还缓冲区到缓冲区池
+            UdpServer* server = (UdpServer*)socket->data;
+            server->buffer_pool_.ReleaseBuffer(buf->base);
         }
     );
     

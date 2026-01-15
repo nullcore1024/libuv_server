@@ -20,8 +20,8 @@ static void SetReusePort(uv_handle_t* handle) {
     }
 }
 
-TcpServer::TcpServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop), config_(config) {
-    PLOG_INFO << "TCP Server created";
+TcpServer::TcpServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop), config_(config), buffer_pool_(config.GetReadBufferSize()) {
+    PLOG_INFO << "TCP Server created with buffer pool size: " << config.GetReadBufferSize();
 }
 
 TcpServer::~TcpServer() {
@@ -105,19 +105,35 @@ bool TcpServer::Start(const std::string& ip, int port) {
             uint32_t conn_id = tcp_server->conn_id_counter_++;
             conn->conn_id_ = conn_id;
             
+            // 设置socket选项
+            int fd;
+            if (uv_fileno((uv_handle_t*)&conn->handle_, &fd) == 0) {
+                // 设置读缓冲区大小
+                int read_buf_size = static_cast<int>(tcp_server->GetConfig().GetReadBufferSize());
+                setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &read_buf_size, sizeof(read_buf_size));
+                
+                // 设置写缓冲区大小
+                int write_buf_size = static_cast<int>(tcp_server->GetConfig().GetWriteBufferSize());
+                setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &write_buf_size, sizeof(write_buf_size));
+                
+                // 设置TCP_NODELAY
+                int no_delay = tcp_server->GetConfig().GetTcpNoDelay() ? 1 : 0;
+                setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &no_delay, sizeof(no_delay));
+            }
+            
             PLOG_INFO << "TCP Server accepted connection from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn_id << ")";
 
             uv_read_start((uv_stream_t*)&conn->handle_, 
                 [](uv_handle_t* h, size_t suggested_size, uv_buf_t* buf) {
                     TcpConnection* conn = (TcpConnection*)h->data;
                     TcpServer* server = conn->server_;
-                    // 使用配置的缓冲区大小
-                    size_t buf_size = server->GetReadBufferSize();
-                    buf->base = new char[buf_size];
-                    buf->len = buf_size;
+                    // 从缓冲区池获取缓冲区
+                    buf->base = server->buffer_pool_.AcquireBuffer();
+                    buf->len = server->GetReadBufferSize();
                 },
                 [](uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
                     TcpConnection* conn = (TcpConnection*)stream->data;
+                    TcpServer* server = conn->server_;
                     if (nread > 0) {
                         PLOG_INFO << "TCP Server received " << nread << " bytes from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << ")";
                         conn->OnDataReceived(buf->base, nread);
@@ -128,7 +144,8 @@ bool TcpServer::Start(const std::string& ip, int port) {
                         PLOG_INFO << "TCP Server connection closed from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << ")";
                         uv_close((uv_handle_t*)stream, nullptr); // Close 由 read error 触发，逻辑在 Close() 内部处理
                     }
-                    delete[] buf->base;
+                    // 将缓冲区归还到缓冲区池
+                    server->buffer_pool_.ReleaseBuffer(buf->base);
                 }
             );
 

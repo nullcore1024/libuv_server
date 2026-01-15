@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <unistd.h> // for close, SO_REUSEPORT
 #include <arpa/inet.h>
+#include <algorithm> // for std::search
 #include <plog/Log.h>
 
 namespace uv_net {
@@ -19,8 +20,8 @@ static void SetReusePort(uv_handle_t* handle) {
     }
 }
 
-WebSocketServer::WebSocketServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop), config_(config) {
-    PLOG_INFO << "WebSocket Server created";
+WebSocketServer::WebSocketServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop), config_(config), buffer_pool_(config.GetReadBufferSize()) {
+    PLOG_INFO << "WebSocket Server created with buffer pool size: " << config.GetReadBufferSize();
 }
 
 WebSocketServer::~WebSocketServer() {
@@ -102,26 +103,44 @@ bool WebSocketServer::Start(const std::string& ip, int port) {
             uint32_t conn_id = ws_server->conn_id_counter_++;
             conn->conn_id_ = conn_id;
             
+            // 设置socket选项
+            int fd;
+            if (uv_fileno((uv_handle_t*)&conn->handle_, &fd) == 0) {
+                // 设置读缓冲区大小
+                int read_buf_size = static_cast<int>(ws_server->GetConfig().GetReadBufferSize());
+                setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &read_buf_size, sizeof(read_buf_size));
+                
+                // 设置写缓冲区大小
+                int write_buf_size = static_cast<int>(ws_server->GetConfig().GetWriteBufferSize());
+                setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &write_buf_size, sizeof(write_buf_size));
+                
+                // 设置TCP_NODELAY
+                int no_delay = ws_server->GetConfig().GetTcpNoDelay() ? 1 : 0;
+                setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &no_delay, sizeof(no_delay));
+            }
+            
             PLOG_INFO << "WebSocket Server accepted connection from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn_id << ")";
             
             uv_read_start((uv_stream_t*)&conn->handle_, 
                 [](uv_handle_t* h, size_t suggested_size, uv_buf_t* buf) {
                     WebSocketConnection* conn = (WebSocketConnection*)h->data;
                     WebSocketServer* server = conn->server_;
-                    // 使用配置的缓冲区大小
-                    size_t buf_size = server->GetConfig().GetReadBufferSize();
-                    buf->base = new char[buf_size];
-                    buf->len = buf_size;
+                    // 从缓冲区池获取缓冲区
+                    buf->base = server->buffer_pool_.AcquireBuffer();
+                    buf->len = server->GetConfig().GetReadBufferSize();
                 },
                 [](uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
                     WebSocketConnection* conn = (WebSocketConnection*)stream->data;
+                    WebSocketServer* server = conn->server_;
                     if (nread > 0) {
                         if (conn->state_ == WebSocketConnection::State::HANDSHAKE) {
                             // 处理握手数据
-                            conn->handshake_buffer_.append(buf->base, nread);
+                            conn->handshake_buffer_.insert(conn->handshake_buffer_.end(), buf->base, buf->base + nread);
                             // 检查是否接收到完整的握手请求
-                            if (conn->handshake_buffer_.find("\r\n\r\n") != std::string::npos) {
-                                conn->ParseHandshake(conn->handshake_buffer_);
+                            if (std::search(conn->handshake_buffer_.begin(), conn->handshake_buffer_.end(), "\r\n\r\n", "\r\n\r\n" + 4) != conn->handshake_buffer_.end()) {
+                                // 将 vector<char> 转换为 string 传递给 ParseHandshake
+                                std::string handshake_str(conn->handshake_buffer_.begin(), conn->handshake_buffer_.end());
+                                conn->ParseHandshake(handshake_str);
                             }
                         } else {
                             // 处理 WebSocket 帧
@@ -134,7 +153,8 @@ bool WebSocketServer::Start(const std::string& ip, int port) {
                         PLOG_INFO << "WebSocket Server connection closed from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << ")";
                         uv_close((uv_handle_t*)stream, nullptr);
                     }
-                    delete[] buf->base;
+                    // 将缓冲区归还到缓冲区池
+                    server->buffer_pool_.ReleaseBuffer(buf->base);
                 }
             );
         } else {

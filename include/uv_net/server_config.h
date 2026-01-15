@@ -14,8 +14,10 @@ public:
         write_buffer_size_(8192),         // 默认8KB写缓冲区
         max_connections_(10000),          // 默认最大连接数10000
         max_send_queue_size_(1000),       // 默认最大发送队列大小
+        max_package_size_(65536),         // 默认最大包大小64KB
         connection_read_timeout_(30000),  // 默认连接读超时30秒
-        heartbeat_interval_(60000)        // 默认心跳间隔60秒
+        heartbeat_interval_(60000),       // 默认心跳间隔60秒
+        tcp_no_delay_(true)               // 默认启用TCP_NODELAY
     {}
 
     // 读缓冲区大小设置
@@ -42,13 +44,23 @@ public:
     void SetHeartbeatInterval(int64_t interval_ms) { heartbeat_interval_ = interval_ms; }
     int64_t GetHeartbeatInterval() const { return heartbeat_interval_; }
 
+    // 最大包大小设置
+    void SetMaxPackageSize(size_t size) { max_package_size_ = size; }
+    size_t GetMaxPackageSize() const { return max_package_size_; }
+
+    // TCP_NODELAY设置
+    void SetTcpNoDelay(bool enable) { tcp_no_delay_ = enable; }
+    bool GetTcpNoDelay() const { return tcp_no_delay_; }
+
 private:
     size_t read_buffer_size_;          // 读缓冲区大小
     size_t write_buffer_size_;         // 写缓冲区大小
     size_t max_connections_;           // 最大连接数
     size_t max_send_queue_size_;       // 最大发送队列大小
+    size_t max_package_size_;          // 最大包大小
     int64_t connection_read_timeout_;   // 连接读超时（毫秒）
     int64_t heartbeat_interval_;        // 心跳间隔（毫秒）
+    bool tcp_no_delay_;                // TCP_NODELAY开关
 };
 
 } // namespace uv_net

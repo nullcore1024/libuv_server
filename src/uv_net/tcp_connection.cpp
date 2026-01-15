@@ -31,15 +31,12 @@ void TcpConnection::Send(const char* data, size_t len) {
         return;
     }
 
-    {
-        std::lock_guard<std::mutex> lock(send_mutex_);
-        // 检查发送队列大小是否超过配置的最大值
-        if (send_queue_.size() >= server_->GetMaxSendQueueSize()) {
-            PLOG_WARNING << "TCP Connection " << conn_id_ << " send queue full, dropping send request";
-            return;
-        }
-        send_queue_.emplace(data, len);
+    // 检查发送队列大小是否超过配置的最大值
+    if (send_queue_.size() >= server_->GetMaxSendQueueSize()) {
+        PLOG_WARNING << "TCP Connection " << conn_id_ << " send queue full, dropping send request";
+        return;
     }
+    send_queue_.emplace(data, len);
     
     PLOG_INFO << "TCP Connection " << conn_id_ << " send queued " << len << " bytes";
     
@@ -47,26 +44,22 @@ void TcpConnection::Send(const char* data, size_t len) {
     last_active_time_ = uv_now(uv_default_loop());
     
     // 触发发送尝试
-    // 注意：这里假设 Send 是在 Loop 线程调用的。如果是跨线程，需要 uv_async
     TrySend();
 }
 
 void TcpConnection::TrySend() {
     std::string data_to_send;
-    {
-        std::lock_guard<std::mutex> lock(send_mutex_);
-        // 如果正在发送，或者队列为空，直接返回
-        if (is_writing_ || send_queue_.empty()) {
-            return;
-        }
-        
-        // 取出队首数据
-        data_to_send = std::move(send_queue_.front());
-        send_queue_.pop();
-        
-        // 标记正在发送
-        is_writing_ = true;
+    // 如果正在发送，或者队列为空，直接返回
+    if (is_writing_ || send_queue_.empty()) {
+        return;
     }
+    
+    // 取出队首数据
+    data_to_send = std::move(send_queue_.front());
+    send_queue_.pop();
+    
+    // 标记正在发送
+    is_writing_ = true;
 
     PLOG_INFO << "TCP Connection " << conn_id_ << " sending " << data_to_send.size() << " bytes";
 
@@ -122,24 +115,21 @@ void TcpConnection::OnWriteComplete(int status) {
     TrySend();
     
     // 检查是否需要优雅关闭
-    {
-        std::lock_guard<std::mutex> lock(send_mutex_);
-        if (is_closing_gracefully_ && send_queue_.empty() && !is_writing_) {
-            PLOG_INFO << "TCP Connection " << conn_id_ << " send queue empty, closing gracefully";
-            // 发送队列已空，执行实际关闭
-            uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
-                TcpConnection* conn = static_cast<TcpConnection*>(handle->data);
-                // 计算在线时长（秒）
-                size_t now = uv_now(uv_default_loop());
-                double online_seconds = (now - conn->create_time_) / 1000.0;
-                PLOG_INFO << "TCP Connection " << conn->conn_id_ << " closed gracefully, online time: " << online_seconds << " seconds";
-                // 触发用户层的 OnClose
-                if (conn->server_) {
-                    conn->server_->OnClose(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}));
-                }
-                delete conn; // 最终释放 Connection 对象
-            });
-        }
+    if (is_closing_gracefully_ && send_queue_.empty() && !is_writing_) {
+        PLOG_INFO << "TCP Connection " << conn_id_ << " send queue empty, closing gracefully";
+        // 发送队列已空，执行实际关闭
+        uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
+            TcpConnection* conn = static_cast<TcpConnection*>(handle->data);
+            // 计算在线时长（秒）
+            size_t now = uv_now(uv_default_loop());
+            double online_seconds = (now - conn->create_time_) / 1000.0;
+            PLOG_INFO << "TCP Connection " << conn->conn_id_ << " closed gracefully, online time: " << online_seconds << " seconds";
+            // 触发用户层的 OnClose
+            if (conn->server_) {
+                conn->server_->OnClose(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}));
+            }
+            delete conn; // 最终释放 Connection 对象
+        });
     }
 }
 
@@ -152,11 +142,7 @@ void TcpConnection::Close() {
     StopHeartbeat();
     
     // 检查发送队列是否为空
-    bool is_empty = false;
-    {
-        std::lock_guard<std::mutex> lock(send_mutex_);
-        is_empty = send_queue_.empty();
-    }
+    bool is_empty = send_queue_.empty();
     
     if (is_empty && !is_writing_) {
         // 发送队列为空，直接关闭
@@ -231,10 +217,8 @@ void TcpConnection::OnDataReceived(const char* data, size_t len) {
     // 更新最后活跃时间
     last_active_time_ = uv_now(uv_default_loop());
     
-    std::lock_guard<std::mutex> lock(recv_mutex_);
-    
     // 将新数据添加到接收缓冲区
-    recv_buffer_.append(data, len);
+    recv_buffer_.insert(recv_buffer_.end(), data, data + len);
     
     // 获取协议解析器
     auto protocol = server_->GetServerProtocol();
@@ -259,7 +243,7 @@ void TcpConnection::OnDataReceived(const char* data, size_t len) {
             server_->OnMessage(std::shared_ptr<TcpConnection>(this, [](TcpConnection*){}), recv_buffer_.data(), package_len);
             
             // 移除已处理的数据
-            recv_buffer_.erase(0, package_len);
+            recv_buffer_.erase(recv_buffer_.begin(), recv_buffer_.begin() + package_len);
         } else if (status == PackageLess) {
             // 数据不足，等待更多数据
             break;

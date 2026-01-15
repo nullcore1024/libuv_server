@@ -3,7 +3,6 @@
 
 #include "connection.h"
 #include <queue>
-#include <mutex>
 #include <cstdint>
 
 namespace uv_net {
@@ -48,9 +47,6 @@ private:
 
     std::queue<std::string> send_queue_;
     bool is_writing_;
-    // 注意：如果 Send 可能被多线程调用，需要加锁。但在 libuv 模型中，
-    // 通常建议所有操作都在 Loop 线程进行。如果必须跨线程调用，需要 mutex。
-    std::mutex send_mutex_;
     
     // 心跳相关
     uv_timer_t heartbeat_timer_;
@@ -59,8 +55,7 @@ private:
     bool is_heartbeat_running_;
     
     // 接收缓冲区，用于协议解析
-    std::string recv_buffer_;
-    std::mutex recv_mutex_; // 保护接收缓冲区的线程安全
+    std::vector<char> recv_buffer_;
 };
 
 } // namespace uv_net

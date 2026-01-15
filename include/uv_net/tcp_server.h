@@ -5,6 +5,7 @@
 #include "server_config.h"
 #include "tcp_connection.h"
 #include "server_protocol.h"
+#include "buffer_pool.h"
 #include <vector>
 #include <atomic>
 #include <memory>
@@ -61,6 +62,9 @@ private:
     
     // 协议解析器
     std::shared_ptr<ServerProtocol> server_protocol_;
+    
+    // 缓冲区池
+    BufferPool buffer_pool_;
     
     // 连接计数
     std::atomic<size_t> current_connections_{0}; // 当前连接数

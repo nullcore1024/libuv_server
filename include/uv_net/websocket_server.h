@@ -5,6 +5,7 @@
 #include "server_config.h"
 #include "websocket_connection.h"
 #include "server_protocol.h"
+#include "buffer_pool.h"
 #include <vector>
 #include <atomic>
 #include <memory>
@@ -50,6 +51,9 @@ private:
     
     // 配置
     ServerConfig config_;
+    
+    // 缓冲区池
+    BufferPool buffer_pool_;
     
     // 协议解析器
     std::shared_ptr<ServerProtocol> server_protocol_;

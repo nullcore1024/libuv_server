@@ -5,6 +5,7 @@
 #include "server_config.h"
 #include "udp_connection.h"
 #include "server_protocol.h"
+#include "buffer_pool.h"
 #include <vector>
 #include <memory>
 
@@ -28,6 +29,9 @@ public:
     
     // 获取协议解析器
     std::shared_ptr<ServerProtocol> GetServerProtocol() const { return server_protocol_; }
+    
+    // 获取配置（供Connection使用）
+    size_t GetReadBufferSize() const { return config_.GetReadBufferSize(); }
 
 private:
     uv_loop_t* loop_;                                    // 使用单个loop
@@ -42,6 +46,9 @@ private:
     
     // 协议解析器
     std::shared_ptr<ServerProtocol> server_protocol_;
+    
+    // 缓冲区池
+    BufferPool buffer_pool_;
 };
 
 } // namespace uv_net
