@@ -8,8 +8,11 @@
 namespace uv_net {
 
 TcpConnection::TcpConnection(TcpServer* server) 
-    : server_(server), port_(0), is_closing_(false), is_writing_(false) {
+    : server_(server), port_(0), conn_id_(0), is_closing_(false), is_closing_gracefully_(false), is_writing_(false), is_heartbeat_running_(false) {
     handle_.data = this;
+    // 初始化心跳定时器
+    uv_timer_init(uv_default_loop(), &heartbeat_timer_);
+    heartbeat_timer_.data = this;
     PLOG_INFO << "TCP Connection created";
 }
 
@@ -19,17 +22,25 @@ TcpConnection::~TcpConnection() {
 
 void TcpConnection::Send(const char* data, size_t len) {
     // 如果正在关闭，直接丢弃
-    if (is_closing_) {
-        PLOG_INFO << "TCP Connection is closing, dropping send request";
+    if (is_closing_ || is_closing_gracefully_) {
+        PLOG_INFO << "TCP Connection " << conn_id_ << " is closing, dropping send request";
         return;
     }
 
     {
         std::lock_guard<std::mutex> lock(send_mutex_);
+        // 检查发送队列大小是否超过配置的最大值
+        if (send_queue_.size() >= server_->GetMaxSendQueueSize()) {
+            PLOG_WARNING << "TCP Connection " << conn_id_ << " send queue full, dropping send request";
+            return;
+        }
         send_queue_.emplace(data, len);
     }
     
-    PLOG_INFO << "TCP Connection send queued " << len << " bytes";
+    PLOG_INFO << "TCP Connection " << conn_id_ << " send queued " << len << " bytes";
+    
+    // 更新最后活跃时间
+    last_active_time_ = uv_now(uv_default_loop());
     
     // 触发发送尝试
     // 注意：这里假设 Send 是在 Loop 线程调用的。如果是跨线程，需要 uv_async
@@ -53,7 +64,7 @@ void TcpConnection::TrySend() {
         is_writing_ = true;
     }
 
-    PLOG_INFO << "TCP Connection sending " << data_to_send.size() << " bytes";
+    PLOG_INFO << "TCP Connection " << conn_id_ << " sending " << data_to_send.size() << " bytes";
 
     // 准备 libuv 写请求
     WriteReq* req = new WriteReq();
@@ -78,7 +89,7 @@ void TcpConnection::TrySend() {
     );
 
     if (r != 0) {
-        PLOG_ERROR << "TCP Connection send failed: " << uv_strerror(r);
+        PLOG_ERROR << "TCP Connection " << conn_id_ << " send failed: " << uv_strerror(r);
         delete req; // 回调没触发，手动删
         is_writing_ = false; // 恢复状态
         // 错误发生，关闭连接
@@ -89,43 +100,121 @@ void TcpConnection::TrySend() {
 void TcpConnection::OnWriteComplete(int status) {
     if (status < 0) {
         if (status != UV_ECANCELED) { // 主动关闭也会产生 ECANCELED，不算错误
-            PLOG_ERROR << "TCP Connection write failed: " << uv_strerror(status);
+            PLOG_ERROR << "TCP Connection " << conn_id_ << " write failed: " << uv_strerror(status);
             Close();
         }
         return;
     }
 
-    PLOG_INFO << "TCP Connection write complete";
+    PLOG_INFO << "TCP Connection " << conn_id_ << " write complete";
 
     // 写成功，重置标志
     is_writing_ = false;
 
+    // 更新最后活跃时间
+    last_active_time_ = uv_now(uv_default_loop());
+
     // *** 关键：尝试发送队列中的下一包数据 ***
     TrySend();
+    
+    // 检查是否需要优雅关闭
+    {
+        std::lock_guard<std::mutex> lock(send_mutex_);
+        if (is_closing_gracefully_ && send_queue_.empty() && !is_writing_) {
+            PLOG_INFO << "TCP Connection " << conn_id_ << " send queue empty, closing gracefully";
+            // 发送队列已空，执行实际关闭
+            uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
+                TcpConnection* conn = static_cast<TcpConnection*>(handle->data);
+                PLOG_INFO << "TCP Connection " << conn->conn_id_ << " closed gracefully";
+                // 触发用户层的 OnClose
+                if (conn->server_) {
+                    conn->server_->OnClose(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}));
+                }
+                delete conn; // 最终释放 Connection 对象
+            });
+        }
+    }
 }
 
 void TcpConnection::Close() {
-    if (is_closing_) return;
-    is_closing_ = true;
+    if (is_closing_ || is_closing_gracefully_) {
+        return;
+    }
     
-    PLOG_INFO << "TCP Connection closing";
+    // 停止心跳
+    StopHeartbeat();
+    
+    // 检查发送队列是否为空
+    bool is_empty = false;
+    {
+        std::lock_guard<std::mutex> lock(send_mutex_);
+        is_empty = send_queue_.empty();
+    }
+    
+    if (is_empty && !is_writing_) {
+        // 发送队列为空，直接关闭
+        is_closing_ = true;
+        PLOG_INFO << "TCP Connection " << conn_id_ << " closing immediately";
+        
+        // 关闭 handle，触发 close 回调
+        uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
+            TcpConnection* conn = static_cast<TcpConnection*>(handle->data);
+            PLOG_INFO << "TCP Connection " << conn->conn_id_ << " closed immediately";
+            // 触发用户层的 OnClose
+            if (conn->server_) {
+                conn->server_->OnClose(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}));
+            }
+            delete conn; // 最终释放 Connection 对象
+        });
+    } else {
+        // 发送队列不为空，执行优雅关闭
+        is_closing_gracefully_ = true;
+        PLOG_INFO << "TCP Connection " << conn_id_ << " closing gracefully";
+        // 不立即关闭，等待发送队列处理完毕
+    }
+}
 
-    // 关闭 handle，触发 close 回调
-    uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
-        TcpConnection* conn = static_cast<TcpConnection*>(handle->data);
-        PLOG_INFO << "TCP Connection closed";
-        // 触发用户层的 OnClose
-        if (conn->server_) {
-            // 这里创建一个 shared_ptr 但不做任何资源管理，仅用于传递给用户
-            // 实际内存由 close 回调里的 delete conn 负责
-            // 注意：这是一个简化的处理，复杂场景需要 shared_from_this
-            conn->server_->OnClose(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}));
-        }
-        delete conn; // 最终释放 Connection 对象
-    });
+void TcpConnection::StartHeartbeat() {
+    if (is_heartbeat_running_) {
+        return;
+    }
+    
+    is_heartbeat_running_ = true;
+    last_active_time_ = uv_now(uv_default_loop());
+    
+    // 启动心跳定时器，间隔为配置的心跳间隔
+    uv_timer_start(&heartbeat_timer_, [](uv_timer_t* timer) {
+        TcpConnection* conn = static_cast<TcpConnection*>(timer->data);
+        conn->OnHeartbeatTimeout();
+    }, server_->GetHeartbeatInterval(), server_->GetHeartbeatInterval());
+    
+    PLOG_INFO << "TCP Connection " << conn_id_ << " heartbeat started, interval: " << server_->GetHeartbeatInterval() << "ms";
+}
+
+void TcpConnection::StopHeartbeat() {
+    if (!is_heartbeat_running_) {
+        return;
+    }
+    
+    uv_timer_stop(&heartbeat_timer_);
+    is_heartbeat_running_ = false;
+    PLOG_INFO << "TCP Connection " << conn_id_ << " heartbeat stopped";
+}
+
+void TcpConnection::OnHeartbeatTimeout() {
+    size_t now = uv_now(uv_default_loop());
+    size_t interval = server_->GetHeartbeatInterval();
+    
+    // 检查上次活跃时间是否超过心跳间隔的两倍
+    if (now - last_active_time_ > interval * 2) {
+        PLOG_WARNING << "TCP Connection " << conn_id_ << " heartbeat timeout, closing connection";
+        Close();
+    }
+    // 否则，继续等待下一次心跳检查
 }
 
 std::string TcpConnection::GetIP() { return ip_; }
 int TcpConnection::GetPort() { return port_; }
+uint32_t TcpConnection::GetConnId() { return conn_id_; }
 
 } // namespace uv_net

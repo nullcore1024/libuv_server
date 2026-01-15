@@ -21,6 +21,7 @@ public:
     void Close() override;
     std::string GetIP() override;
     int GetPort() override;
+    uint32_t GetConnId() override;
 
     // 内部逻辑
     void OnWriteComplete(int status);
@@ -46,6 +47,7 @@ public:
     WebSocketServer* server_;
     std::string ip_;
     int port_;
+    uint32_t conn_id_; // 连接ID
     State state_;
     std::string handshake_buffer_;
 
@@ -82,6 +84,19 @@ private:
     std::queue<std::string> send_queue_;
     bool is_writing_;
     std::mutex send_mutex_;
+    
+    // 优雅关闭相关
+    bool is_closing_gracefully_;
+    
+    // 心跳相关
+    uv_timer_t heartbeat_timer_;
+    size_t last_active_time_;
+    bool is_heartbeat_running_;
+    
+    // 内部方法
+    void StartHeartbeat();
+    void StopHeartbeat();
+    void OnHeartbeatTimeout();
 
     // 辅助方法
     std::string GenerateResponseKey(const std::string& sec_websocket_key);

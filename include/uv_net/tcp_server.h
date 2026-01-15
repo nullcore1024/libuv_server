@@ -2,15 +2,17 @@
 #define UV_NET_TCP_SERVER_H
 
 #include "connection.h"
+#include "server_config.h"
 #include "tcp_connection.h"
 #include <vector>
+#include <atomic>
 
 namespace uv_net {
 
 // TCP Server
 class TcpServer : public Server {
 public:
-    TcpServer(uv_loop_t* loop);
+    TcpServer(uv_loop_t* loop, const ServerConfig& config = ServerConfig());
     ~TcpServer();
 
     void SetOnOpen(CallbackOpen cb) override { on_open_ = cb; }
@@ -18,6 +20,29 @@ public:
     void SetOnClose(CallbackClose cb) override { on_close_ = cb; }
 
     bool Start(const std::string& ip, int port) override;
+
+    // 配置管理
+    void SetConfig(const ServerConfig& config) { config_ = config; }
+    const ServerConfig& GetConfig() const { return config_; }
+    
+    // 缓冲区配置
+    void SetReadBufferSize(size_t size) override { config_.SetReadBufferSize(size); }
+    void SetMaxSendQueueSize(size_t size) override { config_.SetMaxSendQueueSize(size); }
+    
+    // 连接池管理
+    void SetMaxConnections(size_t max) override { config_.SetMaxConnections(max); }
+    void SetHeartbeatInterval(size_t interval_ms) override { config_.SetHeartbeatInterval(interval_ms); }
+    
+    // 连接读超时设置
+    void SetConnectionReadTimeout(size_t timeout_ms) override { config_.SetConnectionReadTimeout(timeout_ms); }
+    
+    // 获取配置（供Connection使用）
+    size_t GetReadBufferSize() const { return config_.GetReadBufferSize(); }
+    size_t GetWriteBufferSize() const { return config_.GetWriteBufferSize(); }
+    size_t GetMaxSendQueueSize() const { return config_.GetMaxSendQueueSize(); }
+    size_t GetMaxConnections() const { return config_.GetMaxConnections(); }
+    size_t GetHeartbeatInterval() const { return config_.GetHeartbeatInterval(); }
+    size_t GetConnectionReadTimeout() const { return config_.GetConnectionReadTimeout(); }
 
     // 内部回调
     void OnNewConnection(std::shared_ptr<Connection> conn);
@@ -33,6 +58,13 @@ private:
     CallbackOpen on_open_;
     CallbackMessage on_message_;
     CallbackClose on_close_;
+    
+    // 配置
+    ServerConfig config_;
+    
+    // 连接计数
+    std::atomic<size_t> current_connections_{0}; // 当前连接数
+    std::atomic<uint32_t> conn_id_counter_{0}; // 连接ID计数器
 };
 
 } // namespace uv_net

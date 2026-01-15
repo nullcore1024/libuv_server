@@ -15,6 +15,7 @@ public:
     struct sockaddr_storage addr_;
     std::string ip_;
     int port_;
+    uint32_t conn_id_; // 连接ID
 
     UdpConnection(UdpServer* server, uv_udp_t* socket, const struct sockaddr* addr);
     ~UdpConnection() override = default;
@@ -23,6 +24,7 @@ public:
     void Close() override;
     std::string GetIP() override;
     int GetPort() override;
+    uint32_t GetConnId() override;
 };
 
 } // namespace uv_net

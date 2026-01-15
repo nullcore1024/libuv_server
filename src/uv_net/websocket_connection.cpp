@@ -58,11 +58,17 @@ static std::string Base64Encode(const unsigned char* data, size_t len) {
 }
 
 WebSocketConnection::WebSocketConnection(WebSocketServer* server)
-    : server_(server), port_(0), state_(State::HANDSHAKE),
+    : server_(server), port_(0), conn_id_(0), state_(State::HANDSHAKE),
       parse_state_(ParseState::READ_HEADER), current_frame_(),
-      bytes_read_(0), is_writing_(false) {
+      bytes_read_(0), is_writing_(false), is_closing_gracefully_(false),
+      is_heartbeat_running_(false) {
     handle_.data = this;
     memset(&current_frame_, 0, sizeof(current_frame_));
+    
+    // 初始化心跳定时器
+    uv_timer_init(uv_default_loop(), &heartbeat_timer_);
+    heartbeat_timer_.data = this;
+    
     PLOG_INFO << "WebSocket Connection created";
 }
 
@@ -130,6 +136,10 @@ void WebSocketConnection::SendHandshakeResponse(const std::string& sec_websocket
 void WebSocketConnection::OnHandshakeComplete() {
     state_ = State::OPEN;
     PLOG_INFO << "WebSocket Connection handshake completed, connection open";
+    
+    // 启动心跳机制
+    StartHeartbeat();
+    
     // 触发用户层的 OnOpen
     if (server_) {
         std::shared_ptr<WebSocketConnection> shared_conn(this, [](WebSocketConnection*){});
@@ -392,12 +402,25 @@ void WebSocketConnection::ProcessPongFrame(const char* data, size_t len) {
 
 // WebSocketConnection 其他方法
 void WebSocketConnection::Send(const char* data, size_t len) {
-    if (state_ != State::OPEN) {
-        PLOG_INFO << "WebSocket Connection not open, dropping send request";
+    if (state_ != State::OPEN || is_closing_gracefully_) {
+        PLOG_INFO << "WebSocket Connection not open or closing, dropping send request";
         return;
     }
+    
+    // 检查发送队列大小是否超过配置的最大值
+    {
+        std::lock_guard<std::mutex> lock(send_mutex_);
+        if (send_queue_.size() >= server_->GetConfig().GetMaxSendQueueSize()) {
+            PLOG_WARNING << "WebSocket Connection send queue full, dropping send request";
+            return;
+        }
+    }
+    
     PLOG_INFO << "WebSocket Connection sending message of " << len << " bytes";
     SendFrame(data, len, 0x01); // 默认发送文本帧
+    
+    // 更新最后活跃时间
+    last_active_time_ = uv_now(uv_default_loop());
 }
 
 void WebSocketConnection::OnWriteComplete(int status) {
@@ -411,34 +434,118 @@ void WebSocketConnection::OnWriteComplete(int status) {
     
     PLOG_INFO << "WebSocket Connection write complete";
     
+    // 更新最后活跃时间
+    last_active_time_ = uv_now(uv_default_loop());
+    
     // 写成功，重置标志
     is_writing_ = false;
     
     // 尝试发送队列中的下一包数据
     TrySend();
+    
+    // 检查是否需要优雅关闭
+    {
+        std::lock_guard<std::mutex> lock(send_mutex_);
+        if (is_closing_gracefully_ && send_queue_.empty() && !is_writing_) {
+            PLOG_INFO << "WebSocket Connection send queue empty, closing gracefully";
+            // 发送队列已空，执行实际关闭
+            uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
+                WebSocketConnection* conn = static_cast<WebSocketConnection*>(handle->data);
+                conn->state_ = State::CLOSED;
+                PLOG_INFO << "WebSocket Connection closed gracefully";
+                // 触发用户层的 OnClose
+                if (conn->server_) {
+                    std::shared_ptr<WebSocketConnection> shared_conn(conn, [](WebSocketConnection*){});
+                    conn->server_->OnClose(shared_conn);
+                }
+                delete conn; // 最终释放 Connection 对象
+            });
+        }
+    }
 }
 
 void WebSocketConnection::Close() {
-    if (state_ == State::CLOSED || state_ == State::CLOSING) return;
-    state_ = State::CLOSING;
+    if (state_ == State::CLOSED || state_ == State::CLOSING || is_closing_gracefully_) {
+        return;
+    }
     
-    PLOG_INFO << "WebSocket Connection closing";
+    // 停止心跳
+    StopHeartbeat();
     
-    // 关闭 handle，触发 close 回调
-    uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
-        WebSocketConnection* conn = static_cast<WebSocketConnection*>(handle->data);
-        conn->state_ = State::CLOSED;
-        PLOG_INFO << "WebSocket Connection closed";
-        // 触发用户层的 OnClose
-        if (conn->server_) {
-            std::shared_ptr<WebSocketConnection> shared_conn(conn, [](WebSocketConnection*){});
-            conn->server_->OnClose(shared_conn);
-        }
-        delete conn; // 最终释放 Connection 对象
-    });
+    // 检查发送队列是否为空
+    bool is_empty = false;
+    {
+        std::lock_guard<std::mutex> lock(send_mutex_);
+        is_empty = send_queue_.empty();
+    }
+    
+    if (is_empty && !is_writing_) {
+        // 发送队列为空，直接关闭
+        state_ = State::CLOSING;
+        PLOG_INFO << "WebSocket Connection closing immediately";
+        
+        // 关闭 handle，触发 close 回调
+        uv_close((uv_handle_t*)&handle_, [](uv_handle_t* handle) {
+            WebSocketConnection* conn = static_cast<WebSocketConnection*>(handle->data);
+            conn->state_ = State::CLOSED;
+            PLOG_INFO << "WebSocket Connection closed immediately";
+            // 触发用户层的 OnClose
+            if (conn->server_) {
+                std::shared_ptr<WebSocketConnection> shared_conn(conn, [](WebSocketConnection*){});
+                conn->server_->OnClose(shared_conn);
+            }
+            delete conn; // 最终释放 Connection 对象
+        });
+    } else {
+        // 发送队列不为空，执行优雅关闭
+        is_closing_gracefully_ = true;
+        state_ = State::CLOSING;
+        PLOG_INFO << "WebSocket Connection closing gracefully";
+        // 不立即关闭，等待发送队列处理完毕
+    }
+}
+
+void WebSocketConnection::StartHeartbeat() {
+    if (is_heartbeat_running_) {
+        return;
+    }
+    
+    is_heartbeat_running_ = true;
+    last_active_time_ = uv_now(uv_default_loop());
+    
+    // 启动心跳定时器，间隔为配置的心跳间隔
+    uv_timer_start(&heartbeat_timer_, [](uv_timer_t* timer) {
+        WebSocketConnection* conn = static_cast<WebSocketConnection*>(timer->data);
+        conn->OnHeartbeatTimeout();
+    }, server_->GetConfig().GetHeartbeatInterval(), server_->GetConfig().GetHeartbeatInterval());
+    
+    PLOG_INFO << "WebSocket Connection heartbeat started, interval: " << server_->GetConfig().GetHeartbeatInterval() << "ms";
+}
+
+void WebSocketConnection::StopHeartbeat() {
+    if (!is_heartbeat_running_) {
+        return;
+    }
+    
+    uv_timer_stop(&heartbeat_timer_);
+    is_heartbeat_running_ = false;
+    PLOG_INFO << "WebSocket Connection heartbeat stopped";
+}
+
+void WebSocketConnection::OnHeartbeatTimeout() {
+    size_t now = uv_now(uv_default_loop());
+    size_t interval = server_->GetConfig().GetHeartbeatInterval();
+    
+    // 检查上次活跃时间是否超过心跳间隔的两倍
+    if (now - last_active_time_ > interval * 2) {
+        PLOG_WARNING << "WebSocket Connection heartbeat timeout, closing connection";
+        Close();
+    }
+    // 否则，继续等待下一次心跳检查
 }
 
 std::string WebSocketConnection::GetIP() { return ip_; }
 int WebSocketConnection::GetPort() { return port_; }
+uint32_t WebSocketConnection::GetConnId() { return conn_id_; }
 
 } // namespace uv_net

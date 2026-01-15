@@ -27,6 +27,7 @@ public:
     virtual void Close() = 0;
     virtual std::string GetIP() = 0;
     virtual int GetPort() = 0;
+    virtual uint32_t GetConnId() = 0;
 };
 
 // 基础 Server 接口
@@ -37,6 +38,17 @@ public:
     virtual void SetOnMessage(CallbackMessage cb) = 0;
     virtual void SetOnClose(CallbackClose cb) = 0;
     virtual bool Start(const std::string& ip, int port) = 0;
+    
+    // 缓冲区配置
+    virtual void SetReadBufferSize(size_t size) = 0;
+    virtual void SetMaxSendQueueSize(size_t size) = 0;
+    
+    // 连接池管理
+    virtual void SetMaxConnections(size_t max) = 0;
+    virtual void SetHeartbeatInterval(size_t interval_ms) = 0;
+    
+    // 连接超时管理
+    virtual void SetConnectionReadTimeout(size_t timeout_ms) = 0;
 };
 
 } // namespace uv_net

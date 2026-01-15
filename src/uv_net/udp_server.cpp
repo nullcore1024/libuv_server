@@ -7,9 +7,9 @@
 
 namespace uv_net {
 
-UdpServer::UdpServer(uv_loop_t* loop) : loop_(loop) {
+UdpServer::UdpServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop), config_(config) {
     PLOG_INFO << "UDP Server created";
-} // 构造函数，接受loop参数
+} // 构造函数，接受loop和config参数
 
 void UdpServer::OnMessage(std::shared_ptr<Connection> conn, const char* data, size_t len) {
     if (on_message_) {

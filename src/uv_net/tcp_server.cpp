@@ -6,6 +6,7 @@
 #include <unistd.h> // for close, SO_REUSEPORT
 #include <arpa/inet.h>
 #include <plog/Log.h>
+#include <atomic>
 
 namespace uv_net {
 
@@ -19,7 +20,7 @@ static void SetReusePort(uv_handle_t* handle) {
     }
 }
 
-TcpServer::TcpServer(uv_loop_t* loop) : loop_(loop) {
+TcpServer::TcpServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop), config_(config) {
     PLOG_INFO << "TCP Server created";
 }
 
@@ -30,9 +31,29 @@ TcpServer::~TcpServer() {
     PLOG_INFO << "TCP Server destroyed";
 }
 
-void TcpServer::OnNewConnection(std::shared_ptr<Connection> conn) { if (on_open_) on_open_(conn); }
-void TcpServer::OnMessage(std::shared_ptr<Connection> conn, const char* data, size_t len) { if (on_message_) on_message_(conn, data, len); }
-void TcpServer::OnClose(std::shared_ptr<Connection> conn) { if (on_close_) on_close_(conn); }
+void TcpServer::OnNewConnection(std::shared_ptr<Connection> conn) {
+    current_connections_++;
+    PLOG_INFO << "TCP Server connection count: " << current_connections_;
+    if (on_open_) {
+        on_open_(conn);
+    }
+}
+
+void TcpServer::OnMessage(std::shared_ptr<Connection> conn, const char* data, size_t len) {
+    if (on_message_) {
+        on_message_(conn, data, len);
+    }
+}
+
+void TcpServer::OnClose(std::shared_ptr<Connection> conn) {
+    if (current_connections_ > 0) {
+        current_connections_--;
+    }
+    PLOG_INFO << "TCP Server connection count: " << current_connections_;
+    if (on_close_) {
+        on_close_(conn);
+    }
+}
 
 bool TcpServer::Start(const std::string& ip, int port) {
     PLOG_INFO << "TCP Server starting on " << ip << ":" << port;
@@ -59,6 +80,14 @@ bool TcpServer::Start(const std::string& ip, int port) {
             return;
         }
         TcpServer* tcp_server = (TcpServer*)server->data;
+        
+        // 检查连接数是否已达上限
+        if (tcp_server->current_connections_ >= tcp_server->GetMaxConnections()) {
+            PLOG_WARNING << "TCP Server connection limit reached: " << tcp_server->GetMaxConnections();
+            // 可以选择直接关闭或拒绝连接
+            return;
+        }
+        
         PLOG_INFO << "TCP Server new connection incoming";
         TcpConnection* conn = new TcpConnection(tcp_server);
         uv_tcp_init(server->loop, &conn->handle_);
@@ -72,29 +101,40 @@ bool TcpServer::Start(const std::string& ip, int port) {
             conn->port_ = (peer.ss_family == AF_INET) ? 
                 ntohs(((struct sockaddr_in*)&peer)->sin_port) : 0;
             
-            PLOG_INFO << "TCP Server accepted connection from " << conn->ip_ << ":" << conn->port_;
+            // 分配连接ID
+            uint32_t conn_id = tcp_server->conn_id_counter_++;
+            conn->conn_id_ = conn_id;
+            
+            PLOG_INFO << "TCP Server accepted connection from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn_id << ")";
 
             uv_read_start((uv_stream_t*)&conn->handle_, 
                 [](uv_handle_t* h, size_t suggested_size, uv_buf_t* buf) {
-                    buf->base = new char[suggested_size];
-                    buf->len = suggested_size;
+                    TcpConnection* conn = (TcpConnection*)h->data;
+                    TcpServer* server = conn->server_;
+                    // 使用配置的缓冲区大小
+                    size_t buf_size = server->GetReadBufferSize();
+                    buf->base = new char[buf_size];
+                    buf->len = buf_size;
                 },
                 [](uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
                     TcpConnection* conn = (TcpConnection*)stream->data;
                     if (nread > 0) {
-                        PLOG_INFO << "TCP Server received " << nread << " bytes from " << conn->ip_ << ":" << conn->port_;
+                        PLOG_INFO << "TCP Server received " << nread << " bytes from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << ")";
                         conn->server_->OnMessage(std::shared_ptr<TcpConnection>(conn, [](TcpConnection*){}), buf->base, nread);
                     } else {
                         if (nread != UV_EOF && nread != UV_ECONNRESET) {
-                            PLOG_ERROR << "TCP Server read error from " << conn->ip_ << ":" << conn->port_ << ": " << uv_strerror(nread);
+                            PLOG_ERROR << "TCP Server read error from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << "):" << uv_strerror(nread);
                         }
-                        PLOG_INFO << "TCP Server connection closed from " << conn->ip_ << ":" << conn->port_;
+                        PLOG_INFO << "TCP Server connection closed from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << ")";
                         uv_close((uv_handle_t*)stream, nullptr); // Close 由 read error 触发，逻辑在 Close() 内部处理
                     }
                     delete[] buf->base;
                 }
             );
 
+            // 启动心跳机制
+            conn->StartHeartbeat();
+            
             std::shared_ptr<Connection> shared_conn(conn, [](TcpConnection*){});
             tcp_server->OnNewConnection(shared_conn);
         } else {

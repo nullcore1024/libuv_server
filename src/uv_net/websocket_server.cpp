@@ -19,7 +19,7 @@ static void SetReusePort(uv_handle_t* handle) {
     }
 }
 
-WebSocketServer::WebSocketServer(uv_loop_t* loop) : loop_(loop) {
+WebSocketServer::WebSocketServer(uv_loop_t* loop, const ServerConfig& config) : loop_(loop), config_(config) {
     PLOG_INFO << "WebSocket Server created";
 }
 
@@ -31,7 +31,8 @@ WebSocketServer::~WebSocketServer() {
 }
 
 void WebSocketServer::OnNewConnection(std::shared_ptr<Connection> conn) { 
-    PLOG_INFO << "WebSocket Server new connection opened";
+    current_connections_++;
+    PLOG_INFO << "WebSocket Server connection count: " << current_connections_;
     if (on_open_) on_open_(conn); 
 }
 
@@ -41,9 +42,15 @@ void WebSocketServer::OnMessage(std::shared_ptr<Connection> conn, const char* da
 }
 
 void WebSocketServer::OnClose(std::shared_ptr<Connection> conn) { 
-    PLOG_INFO << "WebSocket Server connection closed";
+    if (current_connections_ > 0) {
+        current_connections_--;
+    }
+    PLOG_INFO << "WebSocket Server connection count: " << current_connections_;
     if (on_close_) on_close_(conn); 
 }
+
+// 获取配置（供Connection使用）
+const ServerConfig& WebSocketServer::GetConfig() const { return config_; }
 
 bool WebSocketServer::Start(const std::string& ip, int port) {
     PLOG_INFO << "WebSocket Server starting on " << ip << ":" << port;
@@ -70,6 +77,14 @@ bool WebSocketServer::Start(const std::string& ip, int port) {
             return;
         }
         WebSocketServer* ws_server = (WebSocketServer*)server->data;
+        
+        // 检查连接数是否已达上限
+        if (ws_server->current_connections_ >= ws_server->config_.GetMaxConnections()) {
+            PLOG_WARNING << "WebSocket Server connection limit reached: " << ws_server->config_.GetMaxConnections();
+            // 可以选择直接关闭或拒绝连接
+            return;
+        }
+        
         PLOG_INFO << "WebSocket Server new connection incoming";
         WebSocketConnection* conn = new WebSocketConnection(ws_server);
         uv_tcp_init(server->loop, &conn->handle_);
@@ -83,12 +98,20 @@ bool WebSocketServer::Start(const std::string& ip, int port) {
             conn->port_ = (peer.ss_family == AF_INET) ? 
                 ntohs(((struct sockaddr_in*)&peer)->sin_port) : 0;
             
-            PLOG_INFO << "WebSocket Server accepted connection from " << conn->ip_ << ":" << conn->port_;
+            // 分配连接ID
+            uint32_t conn_id = ws_server->conn_id_counter_++;
+            conn->conn_id_ = conn_id;
+            
+            PLOG_INFO << "WebSocket Server accepted connection from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn_id << ")";
             
             uv_read_start((uv_stream_t*)&conn->handle_, 
                 [](uv_handle_t* h, size_t suggested_size, uv_buf_t* buf) {
-                    buf->base = new char[suggested_size];
-                    buf->len = suggested_size;
+                    WebSocketConnection* conn = (WebSocketConnection*)h->data;
+                    WebSocketServer* server = conn->server_;
+                    // 使用配置的缓冲区大小
+                    size_t buf_size = server->GetConfig().GetReadBufferSize();
+                    buf->base = new char[buf_size];
+                    buf->len = buf_size;
                 },
                 [](uv_stream_t* stream, ssize_t nread, const uv_buf_t* buf) {
                     WebSocketConnection* conn = (WebSocketConnection*)stream->data;
@@ -106,9 +129,9 @@ bool WebSocketServer::Start(const std::string& ip, int port) {
                         }
                     } else {
                         if (nread != UV_EOF && nread != UV_ECONNRESET) {
-                            PLOG_ERROR << "WebSocket Server read error from " << conn->ip_ << ":" << conn->port_ << ": " << uv_strerror(nread);
+                            PLOG_ERROR << "WebSocket Server read error from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << "):" << uv_strerror(nread);
                         }
-                        PLOG_INFO << "WebSocket Server connection closed from " << conn->ip_ << ":" << conn->port_;
+                        PLOG_INFO << "WebSocket Server connection closed from " << conn->ip_ << ":" << conn->port_ << " (ConnId: " << conn->conn_id_ << ")";
                         uv_close((uv_handle_t*)stream, nullptr);
                     }
                     delete[] buf->base;

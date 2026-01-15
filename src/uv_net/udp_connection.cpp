@@ -9,7 +9,7 @@
 namespace uv_net {
 
 UdpConnection::UdpConnection(UdpServer* server, uv_udp_t* socket, const struct sockaddr* addr) 
-    : server_(server), socket_(socket), port_(0) {
+    : server_(server), socket_(socket), port_(0), conn_id_(0) {
     memcpy(&addr_, addr, sizeof(addr_));
     char ip_buf[64];
     if (addr->sa_family == AF_INET) {
@@ -44,5 +44,6 @@ void UdpConnection::Send(const char* data, size_t len) {
 void UdpConnection::Close() {} // UDP 无连接，无操作
 std::string UdpConnection::GetIP() { return ip_; }
 int UdpConnection::GetPort() { return ntohs(port_); }
+uint32_t UdpConnection::GetConnId() { return conn_id_; }
 
 } // namespace uv_net
